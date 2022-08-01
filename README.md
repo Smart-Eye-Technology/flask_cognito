@@ -1,7 +1,10 @@
 Flask-Cognito
 -------------
+forked from jetbridge/flask_cognito
+extended to support API Key authorization as well ass JWT
+This module is used by the FaceSDK API to authorize users (with JWT) and vendors (API Key) to access the Luxand API Wrapper
 
-Authenticate users based on AWS Cognito JWT.
+Authenticate users based on AWS Cognito JWT or AWS API Gateway Key
 
 
 # Initialization
@@ -53,6 +56,18 @@ from flask_cognito import cognito_auth_required, current_user, current_cognito_j
 @cognito_group_permissions(['admin','developer'])
 def api_private():
     # user must belongs to "admin" or "developer" groups
+    return jsonify({
+        'foo': "bar"
+    })
+```
+
+# Allow API Key Access
+```python3
+from flask_cognito import cognito_auth_required, current_user, current_cognito_jwt
+
+@route('/api/foo')
+@cognito_auth_required(keys=true)
+def api_private():
     return jsonify({
         'foo': "bar"
     })

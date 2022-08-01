@@ -5,6 +5,10 @@ from werkzeug.local import LocalProxy
 from cognitojwt import CognitoJWTException, decode as cognito_jwt_decode
 from jose.exceptions import JWTError
 import logging
+import boto3
+from botocore.exceptions import ClientError
+import os
+import json
 
 log = logging.getLogger(__name__)
 
@@ -30,6 +34,7 @@ class CognitoAuthError(Exception):
         self.description = description
         self.status_code = status_code
         self.headers = headers
+        
 
     def __repr__(self):
         return f'CognitoAuthError: {self.error}'
@@ -41,8 +46,10 @@ class CognitoAuthError(Exception):
 class CognitoAuth(object):
     identity_callback = None
 
-    def __init__(self, app=None, identity_handler=None):
+    def __init__(self, app=None, identity_handler=None, api_secret=None):
         self.app = app
+        self.api_secret=api_secret
+
         if app is not None:
             self.init_app(app, identity_handler=identity_handler)
 
@@ -68,6 +75,31 @@ class CognitoAuth(object):
         # handle CognitoJWTExceptions
         # TODO: make customizable
         app.errorhandler(CognitoAuthError)(self._cognito_auth_error_handler)
+
+
+    def get_secret(self):
+        secret_name = self.api_secret
+        region_name = os.environ.get('AWS_REGION',"us-east-2")
+
+        # Create a Secrets Manager client
+        session = boto3.session.Session()
+        client = session.client(service_name='secretsmanager',region_name=region_name)
+        try:
+            get_secret_value_response = client.get_secret_value(
+                SecretId=secret_name
+            )
+        except ClientError as e:
+            raise e
+        else:
+            # Decrypts secret using the associated KMS key.
+            # Depending on whether the secret is a string or binary, one of these fields will be populated.
+            if 'SecretString' in get_secret_value_response:
+                secretData = get_secret_value_response['SecretString']
+                secretJSON=json.loads(secretData)
+                secret=secretJSON['key']
+                return secret
+        return None 
+
 
     def _get_required_config(self, app, config_name):
         val = app.config.get(config_name)
@@ -137,15 +169,13 @@ class CognitoAuth(object):
         except (ValueError, JWTError):
             raise CognitoJWTException('Malformed Authentication Token')
 
-
-def cognito_auth_required(fn):
-    """View decorator that requires a valid Cognito JWT token to be present in the request."""
-
-    @wraps(fn)
-    def decorator(*args, **kwargs):
-        _cognito_auth_required()
-        return fn(*args, **kwargs)
-
+def cognito_auth_required(APIKeys: bool = False):
+    def decorator(function):
+        @wraps(function)
+        def wrapper(*args, **kwargs):
+            _cognito_auth_required(APIKeys)
+            return function(*args, **kwargs)
+        return wrapper
     return decorator
 
 def cognito_check_groups(groups: list):
@@ -154,9 +184,7 @@ def cognito_check_groups(groups: list):
         def wrapper(*args, **kwargs):
             _cognito_check_groups(groups)
             return function(*args, **kwargs)
-
         return wrapper
-
     return decorator
 
 ## This adds an alias to the above function to resolve issue #16    
@@ -180,25 +208,44 @@ def _cognito_check_groups(groups: list):
                             status_code=403)
 
 
-def _cognito_auth_required():
+def _cognito_auth_required(APIKeys: bool = False):
     """Does the actual work of verifying the Cognito JWT data in the current request.
     This is done automatically for you by `cognito_jwt_required()` but you could call it manually.
     Doing so would be useful in the context of optional JWT access in your APIs.
     """
-    token = _cog.get_token()
+    authorized=False
 
-    if token is None:
-        auth_header_name = _cog.jwt_header_name
-        auth_header_prefix = _cog.jwt_header_prefix
-        raise CognitoAuthError('Authorization Required',
-                               f'Request does not contain a well-formed access token in the "{auth_header_name}" header beginning with "{auth_header_prefix}"')
-
-    try:
-        # check if token is signed by userpool
-        payload = _cog.decode_token(token=token)
-    except CognitoJWTException as e:
-        log.info('Authentication Failure', exc_info=e)
-        raise CognitoAuthError('Invalid Cognito Authentication Token', str(e)) from e
+    #Handle API Key validation
+    if APIKeys:
+        key= request.headers.get('x-api-key')
+        if(key is not None):
+            #validate auth
+            secretValue=_cog.get_secret()
+            if(key==secretValue):
+                print("Authorized by x-api-key")
+                authorized=True
+            else:
+                authorized=False
+        else:
+            authorized=False
+    
+    #If API key auth failed, try JWT
+    if not authorized:
+        token = _cog.get_token()
+        if token is not None:
+            try:
+                # check if token is signed by userpool
+                payload = _cog.decode_token(token=token)
+                print("Authorized by JWT Bearer")
+                authorized=True
+            except CognitoJWTException as e:
+                authorized=False
+        else:
+            authorized=False
+    
+    #Final catch to end auth
+    if not authorized:
+        raise Exception("Not Authorized")
 
     _request_ctx_stack.top.cogauth_cognito_jwt = payload
     _request_ctx_stack.top.cogauth_current_user = _cog.get_user(payload)
