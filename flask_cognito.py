@@ -78,6 +78,9 @@ class CognitoAuth(object):
 
 
     def get_secret(self):
+
+        return '9C6RLL7bHhEw3Mc2VoCffJAQhZFFNMcA' #TODO: Fix this up
+
         secret_name = self.api_secret
         region_name = os.environ.get('AWS_REGION',"us-east-2")
 
