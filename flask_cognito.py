@@ -217,7 +217,7 @@ def _cognito_auth_required(APIKeys: bool = False):
     Doing so would be useful in the context of optional JWT access in your APIs.
     """
     authorized=False
-
+    payload=""
     #Handle API Key validation
     if APIKeys:
         key= request.headers.get('x-api-key')
