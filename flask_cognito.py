@@ -225,7 +225,6 @@ def _cognito_auth_required(APIKeys: bool = False):
             #validate auth
             secretValue=_cog.get_secret()
             if(key==secretValue):
-                print("Authorized by x-api-key")
                 authorized=True
             else:
                 authorized=False
@@ -239,7 +238,6 @@ def _cognito_auth_required(APIKeys: bool = False):
             try:
                 # check if token is signed by userpool
                 payload = _cog.decode_token(token=token)
-                print("Authorized by JWT Bearer")
                 authorized=True
             except CognitoJWTException as e:
                 authorized=False
