@@ -5,12 +5,12 @@ with open('README.md') as f:
 
 setup(
     name='Flask-Cognito',
-    version='1.20',
+    version='1.30',
     url='https://github.com/jetbridge/flask_cognito',
     license='MIT',
-    author='Mischa Spiegelmock',
-    author_email='mischa@mvstg.biz',
-    description='Authenticate users to Cognito user pool via JWT.',
+    author='Mischa Spiegelmock | Cory Forsythe',
+    author_email='cory.forsythe@caylent.com',
+    description='Authenticate users to Cognito user pool via API Keys or JWT.',
     long_description=long_description,
     long_description_content_type='text/markdown',
     py_modules=['flask_cognito'],
@@ -22,10 +22,10 @@ setup(
     platforms='any',
     install_requires=[
         'Flask',
-        # 'cognitojwt[sync]>=1.1.0',
         'cognitojwt>=1.1.0',
         'werkzeug',
         'requests',
+        'cachetools'
     ],
     keywords='flask aws cognito jwt authentication auth serverless',
     classifiers=[

@@ -2,6 +2,7 @@ from collections import OrderedDict
 from functools import wraps
 from flask import _request_ctx_stack, current_app, jsonify, request
 from werkzeug.local import LocalProxy
+from werkzeug.exceptions import Unauthorized
 from cognitojwt import CognitoJWTException, decode as cognito_jwt_decode
 from jose.exceptions import JWTError
 import logging
@@ -9,6 +10,10 @@ import boto3
 from botocore.exceptions import ClientError
 import os
 import json
+from cachetools import cached, TTLCache
+
+apigatewayClient = boto3.client('apigateway',region_name=os.environ.get('AWS_REGION','us-east-2'))
+cache = TTLCache(maxsize=100000, ttl=300000) #5 mins
 
 log = logging.getLogger(__name__)
 
@@ -76,33 +81,20 @@ class CognitoAuth(object):
         # TODO: make customizable
         app.errorhandler(CognitoAuthError)(self._cognito_auth_error_handler)
 
-
-    def get_secret(self):
-
-        return '9C6RLL7bHhEw3Mc2VoCffJAQhZFFNMcA' #TODO: Fix this up
-
-        secret_name = self.api_secret
-        region_name = os.environ.get('AWS_REGION',"us-east-2")
-
-        # Create a Secrets Manager client
-        session = boto3.session.Session()
-        client = session.client(service_name='secretsmanager',region_name=region_name)
-        try:
-            get_secret_value_response = client.get_secret_value(
-                SecretId=secret_name
-            )
-        except ClientError as e:
-            raise e
-        else:
-            # Decrypts secret using the associated KMS key.
-            # Depending on whether the secret is a string or binary, one of these fields will be populated.
-            if 'SecretString' in get_secret_value_response:
-                secretData = get_secret_value_response['SecretString']
-                secretJSON=json.loads(secretData)
-                secret=secretJSON['key']
-                return secret
-        return None 
-
+    @cached(cache)
+    def _get_keys(self):
+        keys=[]
+        def getVal(item):
+            return item['value']
+        paginator = apigatewayClient.get_paginator('get_usage_plan_keys')
+        response_iterator = paginator.paginate(usagePlanId=os.environ.get('USAGE_PLAN_ID')) 
+        for page in response_iterator:
+            for item in page['items']:
+                keys.append(item['value'])
+        return keys
+    
+    def isValidAPIKey(self, key):
+        return key in self._get_keys()
 
     def _get_required_config(self, app, config_name):
         val = app.config.get(config_name)
@@ -223,8 +215,7 @@ def _cognito_auth_required(APIKeys: bool = False):
         key= request.headers.get('x-api-key')
         if(key is not None):
             #validate auth
-            secretValue=_cog.get_secret()
-            if(key==secretValue):
+            if(_cog.isValidAPIKey(key)):
                 authorized=True
             else:
                 authorized=False
@@ -246,7 +237,7 @@ def _cognito_auth_required(APIKeys: bool = False):
     
     #Final catch to end auth
     if not authorized:
-        raise Exception("Not Authorized")
-
+        raise Unauthorized()
+    
     _request_ctx_stack.top.cogauth_cognito_jwt = payload
     _request_ctx_stack.top.cogauth_current_user = _cog.get_user(payload)
